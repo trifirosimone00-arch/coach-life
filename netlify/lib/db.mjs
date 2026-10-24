@@ -1,10 +1,10 @@
 // Archivio dati: Netlify Blobs, un documento JSON per ogni pezzo di stato dell'utente.
 import { getStore } from "@netlify/blobs";
 
-let _store;
+// Lo store va aperto a ogni chiamata: il token di accesso cambia a ogni invocazione
+// e uno store tenuto in memoria tra due invocazioni avrebbe un token scaduto.
 function store() {
-  if (!_store) _store = getStore({ name: "coachlife", consistency: "strong" });
-  return _store;
+  return getStore({ name: "coachlife", consistency: "strong" });
 }
 
 export async function getJSON(key, fallback = null) {

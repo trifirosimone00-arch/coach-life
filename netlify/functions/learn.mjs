@@ -10,16 +10,26 @@ import { snapshot } from "../lib/snapshot.mjs";
 const BOX_DAYS = [0, 1, 2, 4, 8, 16];
 
 async function generate(schemaName, schema, prompt) {
-  const res = await anthropic().messages.create({
-    model: MODEL_CHAT(),
-    max_tokens: 3000,
-    tools: [{ name: schemaName, description: "Restituisce il contenuto richiesto.", input_schema: schema }],
-    tool_choice: { type: "tool", name: schemaName },
-    messages: [{ role: "user", content: prompt }],
-  });
-  const u = res.content.find((b) => b.type === "tool_use");
-  if (!u) throw new Error("Contenuto non generato");
-  return u.input;
+  const tools = [{ name: schemaName, description: "Restituisce il contenuto richiesto.", input_schema: schema }];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await anthropic().messages.create({
+      model: MODEL_CHAT(),
+      max_tokens: 4000,
+      tools,
+      messages: [{ role: "user", content: `${prompt}\n\nRispondi SOLO chiamando lo strumento "${schemaName}".` }],
+    });
+    const u = res.content.find((b) => b.type === "tool_use" && b.name === schemaName);
+    if (u) return u.input;
+    // ultima possibilità: JSON scritto nel testo
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        return JSON.parse(m[0]);
+      } catch {}
+    }
+  }
+  throw new Error("Contenuto non generato, riprova");
 }
 
 function langInfo(plan, code) {

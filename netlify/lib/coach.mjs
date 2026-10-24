@@ -14,10 +14,9 @@ import {
 export const MODEL_CHAT = () => env("COACH_MODEL", "claude-haiku-5-5");
 export const MODEL_SMART = () => env("COACH_MODEL_SMART", "claude-sonnet-5-5");
 
-let _client;
+// Client nuovo a ogni chiamata: le credenziali del gateway possono cambiare tra un'invocazione e l'altra.
 export function anthropic() {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
+  return new Anthropic({ maxRetries: 2 });
 }
 
 const TONES = {
@@ -447,7 +446,7 @@ function historyToMessages(history, limit = 30) {
   return msgs;
 }
 
-export async function runLoop({ system, messages, tools, model, maxTokens = 1500, exec, maxIters = 6, deadline = Date.now() + 50000, toolChoice }) {
+export async function runLoop({ system, messages, tools, model, maxTokens = 1500, exec, maxIters = 6, deadline = Date.now() + 50000 }) {
   const client = anthropic();
   const msgs = [...messages];
   const texts = [];
@@ -455,7 +454,6 @@ export async function runLoop({ system, messages, tools, model, maxTokens = 1500
   for (let i = 0; i < maxIters; i++) {
     let res;
     const params = { model, max_tokens: maxTokens, system, messages: msgs, tools: useTools };
-    if (toolChoice && i === 0) params.tool_choice = toolChoice;
     try {
       res = await client.messages.create(params);
     } catch (e) {
@@ -557,21 +555,24 @@ export async function generatePlan(uid) {
   const system = `Sei Coach Life, un coach di vita esperto (organizzazione del tempo, allenamento, studio, finanze personali, abitudini). Devi costruire il piano di vita completo e su misura di una persona, partendo dalle sue risposte e dall'intervista. Il piano deve essere REALISTICO e sostenibile (non riempire ogni minuto, lascia margini e tempo libero), rispettare orari di lavoro, spostamenti e sonno, mettere al primo posto le scadenze vicine e gli obiettivi più importanti, e includere tempo per relazioni e uscite. Tutto in italiano. Oggi è ${itDate(today)} (${today}). Tono del coach scelto: ${ctx.profile.settings?.tone || "severo"}. Chiama save_plan una volta sola con tutto il piano.`;
   const user = `RISPOSTE ALLE SCHEDE:\n${JSON.stringify(ctx.profile.answers, null, 1)}\n\nPROFILO DALL'INTERVISTA:\n${ctx.profile.summary}\n\nMEMORIA:\n${memory.map((m) => "- " + m.text).join("\n")}\n\nTRASCRIZIONE INTERVISTA:\n${interview.slice(-30000)}`;
   let saved = null;
-  await runLoop({
-    system,
-    messages: [{ role: "user", content: user }],
-    tools: [PLAN_TOOL],
-    toolChoice: { type: "tool", name: "save_plan" },
-    model: MODEL_SMART(),
-    maxTokens: 16000,
-    maxIters: 1,
-    deadline: Date.now() + 14 * 60000,
-    exec: async (name, input) => {
-      if (name !== "save_plan") throw new Error("solo save_plan");
-      saved = input;
-      return { ok: true };
-    },
-  });
+  const exec = async (name, input) => {
+    if (name !== "save_plan") throw new Error("solo save_plan");
+    saved = input;
+    return { ok: true };
+  };
+  // Alcuni modelli non accettano tool_choice forzato: lo chiediamo nel prompt e riproviamo se serve.
+  for (let attempt = 0; attempt < 2 && !saved; attempt++) {
+    await runLoop({
+      system,
+      messages: [{ role: "user", content: user + (attempt ? "\n\nIMPORTANTE: non rispondere a parole, chiama SUBITO lo strumento save_plan con il piano completo." : "\n\nCostruisci il piano e chiama lo strumento save_plan.") }],
+      tools: [PLAN_TOOL],
+      model: MODEL_SMART(),
+      maxTokens: 16000,
+      maxIters: 1,
+      deadline: Date.now() + 14 * 60000,
+      exec,
+    });
+  }
   if (!saved) throw new Error("Il piano non è stato generato");
   await applyGeneratedPlan(uid, saved, today);
   return saved;
