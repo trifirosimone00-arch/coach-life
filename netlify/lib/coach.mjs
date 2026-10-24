@@ -554,28 +554,50 @@ export async function generatePlan(uid) {
   const today = ctx.now.date;
   const system = `Sei Coach Life, un coach di vita esperto (organizzazione del tempo, allenamento, studio, finanze personali, abitudini). Devi costruire il piano di vita completo e su misura di una persona, partendo dalle sue risposte e dall'intervista. Il piano deve essere REALISTICO e sostenibile (non riempire ogni minuto, lascia margini e tempo libero), rispettare orari di lavoro, spostamenti e sonno, mettere al primo posto le scadenze vicine e gli obiettivi più importanti, e includere tempo per relazioni e uscite. Tutto in italiano. Oggi è ${itDate(today)} (${today}). Tono del coach scelto: ${ctx.profile.settings?.tone || "severo"}. Chiama save_plan una volta sola con tutto il piano.`;
   const user = `RISPOSTE ALLE SCHEDE:\n${JSON.stringify(ctx.profile.answers, null, 1)}\n\nPROFILO DALL'INTERVISTA:\n${ctx.profile.summary}\n\nMEMORIA:\n${memory.map((m) => "- " + m.text).join("\n")}\n\nTRASCRIZIONE INTERVISTA:\n${interview.slice(-30000)}`;
+  // Il piano viene chiesto come JSON nel testo (più affidabile di uno strumento con uno schema enorme),
+  // in streaming e con molto spazio. Se il modello principale fallisce, si riprova con quello veloce.
+  const fields = Object.entries(PLAN_TOOL.input_schema.properties)
+    .map(([k, v]) => `- "${k}": ${v.description || v.type}`)
+    .join("\n");
+  const ask = `${user}\n\nCostruisci il piano completo. Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo e senza blocchi di codice, con queste chiavi (obbligatorie: summary, message, routine):\n${fields}`;
+  const sys = system.replace("Chiama save_plan una volta sola con tutto il piano.", "Rispondi solo con il JSON del piano.");
   let saved = null;
-  const exec = async (name, input) => {
-    if (name !== "save_plan") throw new Error("solo save_plan");
-    saved = input;
-    return { ok: true };
-  };
-  // Alcuni modelli non accettano tool_choice forzato: lo chiediamo nel prompt e riproviamo se serve.
-  for (let attempt = 0; attempt < 2 && !saved; attempt++) {
-    await runLoop({
-      system,
-      messages: [{ role: "user", content: user + (attempt ? "\n\nIMPORTANTE: non rispondere a parole, chiama SUBITO lo strumento save_plan con il piano completo." : "\n\nCostruisci il piano e chiama lo strumento save_plan.") }],
-      tools: [PLAN_TOOL],
-      model: MODEL_SMART(),
-      maxTokens: 16000,
-      maxIters: 1,
-      deadline: Date.now() + 14 * 60000,
-      exec,
-    });
+  for (const model of [MODEL_SMART(), MODEL_CHAT()]) {
+    try {
+      const stream = anthropic().messages.stream({ model, max_tokens: 32000, system: sys, messages: [{ role: "user", content: ask }] });
+      const final = await stream.finalMessage();
+      const text = final.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+      console.log("plan", model, "stop:", final.stop_reason, "usage:", JSON.stringify(final.usage), "chars:", text.length);
+      saved = parsePlanJson(text);
+      if (saved?.routine?.length) break;
+      console.error("plan: JSON non valido o senza routine. Inizio:", text.slice(0, 300), "... fine:", text.slice(-300));
+      saved = null;
+    } catch (e) {
+      console.error("plan error", model, e?.status, e?.message);
+    }
   }
   if (!saved) throw new Error("Il piano non è stato generato");
   await applyGeneratedPlan(uid, saved, today);
   return saved;
+}
+
+// Estrae un oggetto JSON dal testo del modello (tollera ```json e testo attorno).
+function parsePlanJson(text) {
+  let t = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const a = t.indexOf("{");
+  const b = t.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  t = t.slice(a, b + 1);
+  try {
+    return JSON.parse(t);
+  } catch {
+    // virgole finali prima di } o ]
+    try {
+      return JSON.parse(t.replace(/,\s*([}\]])/g, "$1"));
+    } catch {
+      return null;
+    }
+  }
 }
 
 export async function applyGeneratedPlan(uid, saved, today) {
