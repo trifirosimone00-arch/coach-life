@@ -103,8 +103,15 @@ const ACTIONS = {
     window.scrollTo(0, 0);
     sendChat("", { start: true });
   },
-  async obGenerate() {
-    await act("onboarding.generate");
+  async obGenerate(el) {
+    if (S._generating) return;
+    S._generating = true;
+    if (el) el.disabled = true;
+    try {
+      await act("onboarding.generate");
+    } finally {
+      S._generating = false;
+    }
   },
   async obBackCards() {
     await act("onboarding.back", { step: "cards" });

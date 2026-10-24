@@ -76,13 +76,17 @@ async function handle(uid, b, req) {
         return p;
       });
       break;
-    case "onboarding.generate":
+    case "onboarding.generate": {
+      // Evita di lanciare più generazioni insieme (tocchi ripetuti su Riprova)
+      const job = await getJSON(K.job(uid), null);
+      if (job?.job === "plan" && job.status === "running" && Date.now() - job.ts < 10 * 60000) break;
       await update(K.profile(uid), defaultProfile, (p) => {
         p.onboardingStep = "generating";
         return p;
       });
       await startJob(siteUrl(req), uid, "plan");
       break;
+    }
     case "onboarding.back":
       await update(K.profile(uid), defaultProfile, (p) => {
         p.onboardingStep = b.step === "cards" ? "cards" : "interview";
