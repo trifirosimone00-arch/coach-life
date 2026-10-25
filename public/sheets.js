@@ -26,9 +26,11 @@ const field = (label, inner) => `<label class="field"><span>${label}</span>${inn
 const SHEETS = {
   // ----- Chat completa -----
   chat: {
-    full: true,
+    tall: true,
     render() {
-      return `${head("Coach", "Scrivi o tieni premuto il microfono")}<div data-thread="300" data-scroll="self" style="flex:1;overflow:auto;padding-bottom:90px">${threadHtml(300)}</div>${composerHtml({ id: "sheet", noTabs: true })}`;
+      return `<div class="sheet-head chat-head"><div class="row" style="gap:10px"><span class="cp-dot">${ic("coach")}</span><div><h2>Coach</h2><p class="tiny muted">Scrivi o tieni premuto il microfono</p></div></div>
+        <button class="close-big" data-act="closeSheet" aria-label="Chiudi la chat">${ic("down")}</button></div>
+        <div class="chat-scroll" data-thread="300" data-scroll="self">${threadHtml(300)}</div>${composerHtml({ id: "sheet", noTabs: true })}`;
     },
   },
 

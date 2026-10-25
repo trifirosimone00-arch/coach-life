@@ -154,6 +154,7 @@ const P = {
   skip: '<path d="M6 6l8 6-8 6V6ZM18 6v12"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
   back: '<path d="M15 6l-6 6 6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   flame: '<path d="M12 21c3.5 0 6-2.4 6-5.8 0-3.7-3-5.7-4-9.2-2.3 1.6-3.4 3.9-3.3 6-1-.7-1.7-1.8-1.9-3C7.3 10.3 6 12.4 6 15.2 6 18.6 8.5 21 12 21Z"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
@@ -275,7 +276,7 @@ function renderSheet() {
   }
   const keepScroll = $(".sheet", root)?.scrollTop;
   const def = SHEETS[S.sheet.name];
-  const full = def.full ? " full" : "";
+  const full = def.full ? " full" : def.tall ? " tall" : "";
   root.innerHTML = `<div class="sheet-backdrop" data-act="closeSheet"></div><div class="sheet${full}" role="dialog" aria-modal="true"><div class="sheet-inner">${def.full ? "" : '<div class="grab"></div>'}${def.render(S.sheet.props)}</div></div>`;
   document.body.style.overflow = "hidden";
   const sh = $(".sheet", root);
@@ -662,3 +663,33 @@ function ring(progress, size = 42, label = "") {
   const p = Math.max(0, Math.min(1, progress || 0));
   return `<svg class="ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" stroke="var(--s3)" stroke-width="4" fill="none"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" stroke="var(--text)" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p)}" transform="rotate(-90 ${size / 2} ${size / 2})"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="var(--text)" style="font: 600 15px var(--display)">${label}</text></svg>`;
 }
+
+// Chiudi i fogli trascinandoli verso il basso dalla maniglia o dall'intestazione.
+let dragY = null;
+let dragSheet = null;
+document.addEventListener("touchstart", (e) => {
+  const handle = e.target.closest(".sheet .grab, .sheet .sheet-head, .sheet .chat-head");
+  if (!handle || e.target.closest("button, input, textarea, select")) return;
+  dragSheet = handle.closest(".sheet");
+  dragY = e.touches[0].clientY;
+  dragSheet.style.transition = "none";
+}, { passive: true });
+document.addEventListener("touchmove", (e) => {
+  if (dragY === null || !dragSheet) return;
+  const dy = Math.max(0, e.touches[0].clientY - dragY);
+  dragSheet.style.transform = `translateY(${dy}px)`;
+}, { passive: true });
+document.addEventListener("touchend", (e) => {
+  if (dragY === null || !dragSheet) return;
+  const dy = (e.changedTouches[0]?.clientY || dragY) - dragY;
+  const sh = dragSheet;
+  dragY = null;
+  dragSheet = null;
+  sh.style.transition = "transform 0.2s ease";
+  if (dy > 90) {
+    sh.style.transform = "translateY(100%)";
+    setTimeout(closeSheet, 180);
+  } else sh.style.transform = "";
+});
+// Tasto Esc e "indietro" chiudono il foglio aperto
+document.addEventListener("keydown", (e) => e.key === "Escape" && S.sheet && closeSheet());
