@@ -589,12 +589,7 @@ setInterval(() => {
 // Niente zoom: blocca il pizzico (Safari) e il doppio tocco.
 ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
 document.addEventListener("touchmove", (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
-let lastTouchEnd = 0;
-document.addEventListener("touchend", (e) => {
-  const now = Date.now();
-  if (now - lastTouchEnd < 300 && !e.target.closest("input, textarea, select")) e.preventDefault();
-  lastTouchEnd = now;
-}, { passive: false });
+// Il doppio tocco è già bloccato da touch-action: manipulation nel CSS (senza perdere i tocchi veloci).
 
 (async function boot() {
   const h = location.hash.slice(1);
