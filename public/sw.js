@@ -1,5 +1,5 @@
 // Service worker di Coach Life: notifiche push e cache dei file dell'app.
-const CACHE = "coachlife-v1";
+const CACHE = "coachlife-v2";
 const SHELL = ["/", "/app.css", "/core.js", "/views.js", "/sheets.js", "/app.js", "/onboarding.js", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

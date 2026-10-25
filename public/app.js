@@ -123,6 +123,11 @@ const ACTIONS = {
     toast("Si parte");
     if (!S.data.pushDevices) setTimeout(() => enablePush(), 600);
   },
+  async regenPlan() {
+    if (!confirmLight("Rifaccio il piano da capo con le nuove regole (più tempo libero e pause)? Il piano attuale resta finché non approvi il nuovo.")) return;
+    await act("onboarding.generate", { regenerate: true });
+    window.scrollTo(0, 0);
+  },
   async redoInterview() {
     if (!confirmLight("Rifai l'intervista? Il piano attuale resta finché non approvi quello nuovo.")) return;
     await act("onboarding.back", { step: "interview" });

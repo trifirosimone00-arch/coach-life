@@ -33,7 +33,7 @@ function fmtItem(it, st) {
 }
 
 // Costruisce il contesto aggiornato dell'utente da dare al coach.
-export async function buildContext(uid) {
+export async function buildContext(uid, opts = {}) {
   const [profile, plan, game, memory, pending] = await Promise.all([
     getJSON(K.profile(uid), defaultProfile),
     getJSON(K.plan(uid), defaultPlan),
@@ -57,7 +57,7 @@ export async function buildContext(uid) {
   const tomorrowItems = itemsForDate(plan, tomorrow);
   const upcoming = (plan.tasks || []).filter((t) => !t.done && t.date && t.date > tomorrow && t.date <= addDays(today, 21));
   const undated = (plan.tasks || []).filter((t) => !t.done && !t.date);
-  const insights = plan.status === "active" ? await skipInsights(uid, plan, today) : [];
+  const insights = opts.insights && plan.status === "active" ? await skipInsights(uid, plan, today) : [];
   const cigToday = logs.filter((l) => l.type === "sigaretta" && l.date === today).reduce((s, l) => s + (l.value ?? 1), 0);
   const limit = smokingLimit(plan, today);
   const sav = plan.smoking?.startDate && plan.smoking.startDate < today ? smokingSavings(plan, logs, plan.smoking.startDate, addDays(today, -1)) : null;
@@ -130,7 +130,7 @@ function systemPrompt(ctx, { voice, activity, interview, craving }) {
 TONO: ${tone}
 
 COME LAVORI:
-- Sei concreto e breve: messaggi da chat, 1-5 frasi. Niente papiri. Usa elenchi solo se servono davvero.
+- Sei BREVISSIMO: di solito 1-3 righe, come un messaggio WhatsApp. Niente premesse, niente riassunti, niente elenchi lunghi. Ti allunghi solo se la persona ti chiede di spiegare o di fare un piano dettagliato.
 - Registri tutto quello che la persona ti dice di aver fatto usando gli strumenti (log_entries, set_activity_status): sigarette, spese, entrate, pasti con voto, ore di sonno, allenamenti con serie e pesi, studio, umore... Non chiedere conferma per registrare: registra e dillo in 3 parole.
 - Gli id tra parentesi quadre nel contesto servono solo a te per gli strumenti: non mostrarli mai alla persona.
 - COMMISSIONI, IMPEGNI E DECISIONI: quando la persona dice che deve fare qualcosa (una commissione, un appuntamento, una scadenza, una cosa da fare in casa, per lavoro, con il partner o gli amici), guarda la sua agenda e proponi il momento migliore considerando: tempo per arrivarci e distanza (chiedi dove si trova o dov'è il posto se non lo sai), orari di apertura del posto (se serve cercali con web_search), urgenza e scadenza, e il fatto di non sacrificare le attività importanti. Rispondi con LA SCELTA MIGLIORE + UN'ALTERNATIVA, ognuna con il perché in una riga. Quando la persona conferma ("ok", "va bene", "mettila"), aggiungila con add_task (data, ora inizio e fine). Se dice esplicitamente "mettila tu" o simili, aggiungila subito.
@@ -506,7 +506,7 @@ export async function coachReply(uid, { message, voice = false, activity = null,
     messages,
     tools,
     model: MODEL_CHAT(),
-    maxTokens: voice ? 600 : 1500,
+    maxTokens: voice ? 400 : 900,
     exec: (n, i) => execTool(uid, ctx, n, i, effects),
   });
   const reply = text || (effects.length ? "Fatto." : "Ok.");
@@ -552,7 +552,13 @@ export async function generatePlan(uid) {
   const interview = history.filter((m) => m.kind === "interview").map((m) => `${m.role === "user" ? "PERSONA" : "COACH"}: ${m.text}`).join("\n");
   const memory = await getJSON(K.memory(uid), []);
   const today = ctx.now.date;
-  const system = `Sei Coach Life, un coach di vita esperto (organizzazione del tempo, allenamento, studio, finanze personali, abitudini). Devi costruire il piano di vita completo e su misura di una persona, partendo dalle sue risposte e dall'intervista. Il piano deve essere REALISTICO e sostenibile (non riempire ogni minuto, lascia margini e tempo libero), rispettare orari di lavoro, spostamenti e sonno, mettere al primo posto le scadenze vicine e gli obiettivi più importanti, e includere tempo per relazioni e uscite. Tutto in italiano. Oggi è ${itDate(today)} (${today}). Tono del coach scelto: ${ctx.profile.settings?.tone || "severo"}. Chiama save_plan una volta sola con tutto il piano.`;
+  const system = `Sei Coach Life, un coach di vita esperto (organizzazione del tempo, allenamento, studio, finanze personali, abitudini). Devi costruire il piano di vita completo e su misura di una persona, partendo dalle sue risposte e dall'intervista. Il piano deve essere REALISTICO e sostenibile. Regole obbligatorie:
+1) Durate vere: ogni attività deve avere il tempo che serve davvero (es. palestra 75-90 min compresi spogliatoio e doccia, studio almeno 45-60 min per blocco, pasti 30-45 min). Niente attività da 10-15 minuti infilate in un buco.
+2) Pause e spostamenti: almeno 15-30 minuti liberi tra un'attività e l'altra, più il tempo per spostarsi quando si cambia luogo. Mai attività attaccate una all'altra.
+3) Tempo libero vero: ogni giorno lavorativo almeno 1,5-2 ore senza niente in programma (oltre ai pasti), e il weekend più leggero (almeno mezza giornata libera).
+4) Non mettere attività durante l'orario di lavoro o di lezione (tranne cose brevissime in pausa pranzo se la persona l'ha chiesto). Rispetta l'ora di sveglia e di letto: niente di impegnativo nell'ultima ora prima di dormire.
+5) Meglio poche attività fatte bene che tante: privilegia le scadenze vicine e gli obiettivi più importanti; le cose secondarie a giorni alterni.
+6) Includi tempo per relazioni e uscite nelle sere che la persona preferisce. Tutto in italiano. Oggi è ${itDate(today)} (${today}). Tono del coach scelto: ${ctx.profile.settings?.tone || "severo"}. Chiama save_plan una volta sola con tutto il piano.`;
   const user = `RISPOSTE ALLE SCHEDE:\n${JSON.stringify(ctx.profile.answers, null, 1)}\n\nPROFILO DALL'INTERVISTA:\n${ctx.profile.summary}\n\nMEMORIA:\n${memory.map((m) => "- " + m.text).join("\n")}\n\nTRASCRIZIONE INTERVISTA:\n${interview.slice(-30000)}`;
   // Il piano viene chiesto come JSON nel testo (più affidabile di uno strumento con uno schema enorme),
   // in streaming e con molto spazio. Se il modello principale fallisce, si riprova con quello veloce.
@@ -631,7 +637,7 @@ export async function applyGeneratedPlan(uid, saved, today) {
 
 // ----- Report settimanale e mensile -----
 export async function generateReport(uid, kind = "weekly") {
-  const ctx = await buildContext(uid);
+  const ctx = await buildContext(uid, { insights: true });
   const today = ctx.now.date;
   const from = kind === "monthly" ? today.slice(0, 7) + "-01" : addDays(today, -6);
   const logs = await logsSince(uid, from, today);
@@ -684,7 +690,7 @@ export async function generateReport(uid, kind = "weekly") {
 
 // ----- Adattamento: proposta di modifiche se salta spesso qualcosa -----
 export async function generateAdapt(uid) {
-  const ctx = await buildContext(uid);
+  const ctx = await buildContext(uid, { insights: true });
   const insights = await skipInsights(uid, ctx.plan, ctx.now.date);
   const pending = await getJSON(K.pending(uid), []);
   if (!insights.length || pending.length) return null;

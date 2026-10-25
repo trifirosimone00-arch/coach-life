@@ -31,7 +31,7 @@ function render() {
     return;
   }
   const views = { oggi: homeView, agenda: agendaView, progressi: progressView, lingue: learnView, tu: meView };
-  app.innerHTML = (views[S.tab] || homeView)() + composerHtml() + tabsHtml();
+  app.innerHTML = (views[S.tab] || homeView)() + fabHtml() + tabsHtml();
   afterRender();
 }
 
@@ -206,6 +206,105 @@ function itemRow(it, date) {
   </li>`;
 }
 
+// Colore dell'area di un'attività
+function catColor(cat) {
+  return `var(--c-${cat || "altro"}, var(--c-altro))`;
+}
+
+// Anello colorato con valore al centro
+function statRing({ value, max, color, center, label, warn = false, act = "", extra = "" }) {
+  const p = max ? Math.max(0, Math.min(1, value / max)) : 0;
+  const r = 26, c = 2 * Math.PI * r;
+  return `<button class="ring-stat" ${act ? `data-act="${act}"` : ""} ${extra}>
+    <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true"><circle cx="32" cy="32" r="${r}" stroke="var(--s3)" stroke-width="7" fill="none"/>
+    <circle cx="32" cy="32" r="${r}" stroke="${warn ? "var(--bad)" : color}" stroke-width="7" fill="none" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - p)).toFixed(1)}" transform="rotate(-90 32 32)"/></svg>
+    <span class="rs-center">${center}</span><span class="rs-label">${label}</span></button>`;
+}
+
+// Timeline verticale della giornata a blocchi colorati.
+// I tratti liberi lunghi vengono compressi in una fascia "Tempo libero".
+function timelineHtml(items, date) {
+  const list = items.filter((i) => i.kind !== "morning" && toMin(i.start) !== null);
+  if (!list.length) return `<div class="card empty"><h3>Giornata libera</h3><p class="small">Dimmi cosa devi fare e lo organizzo io.</p></div>`;
+  const isToday = date === S.data.today;
+  const nowM = nowMinutes();
+  const starts = list.map((i) => toMin(i.start));
+  const ends = list.map((i) => Math.max(toMin(i.end) ?? toMin(i.start) + 30, toMin(i.start) + 20));
+  const t0 = Math.floor(Math.min(...starts) / 60) * 60;
+  const t1 = Math.ceil(Math.max(...ends) / 60) * 60;
+  const PX = 1.3, GAP = 90, FREE_H = 46;
+  // tratti occupati uniti
+  const iv = list.map((_, k) => [starts[k], ends[k]]).sort((a, b) => a[0] - b[0]);
+  const busy = [];
+  for (const [a, b] of iv) {
+    const last = busy[busy.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else busy.push([a, b]);
+  }
+  // segmenti: normali o liberi compressi
+  const segs = [];
+  let cur = t0;
+  const pushFree = (a, b) => {
+    if (b - a > GAP) {
+      segs.push({ a, b: a + 15, c: false });
+      segs.push({ a: a + 15, b: b - 15, c: true });
+      segs.push({ a: b - 15, b, c: false });
+    } else if (b > a) segs.push({ a, b, c: false });
+  };
+  for (const [a, b] of busy) {
+    pushFree(cur, a);
+    segs.push({ a, b, c: false });
+    cur = b;
+  }
+  pushFree(cur, t1);
+  let y = 0;
+  for (const sg of segs) {
+    sg.y = y;
+    y += sg.c ? FREE_H : (sg.b - sg.a) * PX;
+  }
+  const H = y;
+  const Y = (m) => {
+    const sg = segs.find((x) => m >= x.a && m <= x.b) || segs[segs.length - 1];
+    return sg.c ? sg.y + ((m - sg.a) / (sg.b - sg.a)) * FREE_H : sg.y + (m - sg.a) * PX;
+  };
+  let hours = "";
+  for (let h = t0; h <= t1; h += 60) {
+    const sg = segs.find((x) => h >= x.a && h <= x.b);
+    if (!sg || sg.c) continue;
+    hours += `<div class="tl-hour" style="top:${Y(h).toFixed(0)}px"><span>${String((h / 60) % 24).padStart(2, "0")}</span></div>`;
+  }
+  const free = segs
+    .filter((x) => x.c)
+    .map((x) => {
+      const mins = x.b - x.a + 30;
+      const hh = Math.floor(mins / 60), mm = mins % 60;
+      return `<div class="tl-free" style="top:${x.y.toFixed(0)}px;height:${FREE_H}px"><span>Tempo libero · ${hh ? hh + "h" : ""}${mm ? " " + mm + "'" : ""}</span></div>`;
+    })
+    .join("");
+  const laneEnd = [0, 0];
+  const blocks = list
+    .map((it, k) => {
+      const s = starts[k], e = ends[k];
+      const lane = s < laneEnd[0] ? 1 : 0;
+      laneEnd[lane] = e;
+      const top = Y(s);
+      const hgt = Math.max(Y(e) - top - 4, 46);
+      const st = it.state?.status || "";
+      const curr = isToday && S._currentId === it.id;
+      const compact = hgt < 58;
+      return `<div class="tl-block ${st}${curr ? " current" : ""}${lane ? " lane2" : ""}${compact ? " compact" : ""}" style="top:${top.toFixed(0)}px;height:${hgt.toFixed(0)}px;--c:${catColor(it.category)}">
+        <button class="tb-main" data-act="openItem" data-id="${it.id}" data-date="${date}">
+          <span class="tb-time">${it.start}${it.end && !compact ? "–" + it.end : ""}${st && st !== "done" ? ` · ${STATUS_LABEL[st]}` : ""}</span>
+          <b>${esc(it.title)}</b>${hgt > 70 && it.location ? `<span class="tb-sub">${esc(it.location)}</span>` : ""}
+        </button>
+        <button class="tb-check" data-act="quickDone" data-id="${it.id}" data-date="${date}" aria-label="Segna come fatto">${st === "skipped" ? ic("x") : ic("check")}</button>
+      </div>`;
+    })
+    .join("");
+  const nowLine = isToday && nowM >= t0 && nowM <= t1 ? `<div class="tl-now" style="top:${Y(nowM).toFixed(0)}px"></div>` : "";
+  return `<div class="day-tl" style="height:${(H + 8).toFixed(0)}px">${hours}${free}${blocks}${nowLine}</div>`;
+}
+
 function homeView() {
   const d = S.data;
   const items = d.todayItems.filter((i) => i.kind !== "morning");
@@ -214,6 +313,7 @@ function homeView() {
   const g = d.game;
   const name = d.profile.name;
   const doneN = items.filter((i) => i.state?.status === "done").length;
+
   let nowCard = "";
   if (cur) {
     const it = cur.item;
@@ -221,31 +321,42 @@ function homeView() {
     const label = cur.when === "now" ? (st === "started" ? "In corso" : "Adesso") : cur.when === "late" ? "In ritardo" : st === "snoozed" ? "Rimandata" : "Prossima";
     const actions =
       st === "started"
-        ? `<button class="btn now" data-act="activityMode" data-id="${it.id}">${ic("play")}Modalità attività</button><button class="btn" data-act="openItem" data-id="${it.id}" data-date="${d.today}" data-end="1">${ic("check")}Fatto</button><button class="btn" data-act="skipItem" data-id="${it.id}">${ic("skip")}Salta</button>`
-        : `<button class="btn ${cur.when === "next" ? "primary" : "now"}" data-act="startItem" data-id="${it.id}">${ic("play")}Inizia</button><button class="btn" data-act="snoozeItem" data-id="${it.id}">${ic("snooze")}15 min</button><button class="btn" data-act="skipItem" data-id="${it.id}">${ic("skip")}Salta</button>`;
-    nowCard = `<section class="now-card">
+        ? `<button class="btn now" data-act="activityMode" data-id="${it.id}">${ic("play")}Vai</button><button class="btn" data-act="openItem" data-id="${it.id}" data-date="${d.today}" data-end="1">${ic("check")}Fatto</button><button class="btn" data-act="skipItem" data-id="${it.id}">${ic("skip")}Salta</button>`
+        : `<button class="btn ${cur.when === "next" ? "primary" : "now"}" data-act="startItem" data-id="${it.id}">${ic("play")}Inizia</button><button class="btn" data-act="snoozeItem" data-id="${it.id}">${ic("snooze")}15'</button><button class="btn" data-act="skipItem" data-id="${it.id}">${ic("skip")}Salta</button>`;
+    nowCard = `<section class="now-card" style="--c:${catColor(it.category)}">
       <div class="label${cur.when === "next" ? " later" : ""}">${label}</div>
       <div class="now-time">${it.start || "--:--"}${it.end ? `<small>– ${it.end}</small>` : ""}</div>
       <button class="now-title" data-act="openItem" data-id="${it.id}" data-date="${d.today}" style="text-align:left">${esc(it.title)}</button>
       ${it.notes ? `<p class="muted small" style="margin-top:4px">${esc(it.notes)}</p>` : ""}
       <div class="now-actions">${actions}</div>
-      <div class="dayline" aria-label="${doneN} su ${items.length} fatte">${items.map((i) => `<i class="${i.state?.status === "done" ? "done" : i.state?.status === "skipped" ? "skipped" : i.id === it.id ? "current" : ""}"></i>`).join("")}</div>
     </section>`;
   } else {
-    nowCard = `<section class="now-card"><div class="label later">Giornata</div><div class="now-title" style="margin-top:10px">${items.length ? "Hai chiuso tutto per oggi." : "Niente in agenda oggi."}</div><p class="muted small" style="margin-top:6px">${items.length ? `${doneN} su ${items.length} fatte. Serie: ${g.streak} giorni.` : "Dimmi cosa devi fare e lo organizzo io."}</p>
-    <div class="dayline">${items.map((i) => `<i class="${i.state?.status === "done" ? "done" : i.state?.status === "skipped" ? "skipped" : ""}"></i>`).join("")}</div></section>`;
+    nowCard = `<section class="now-card"><div class="label later">Giornata</div><div class="now-title" style="margin-top:10px">${items.length ? "Hai chiuso tutto per oggi." : "Niente in agenda oggi."}</div><p class="muted small" style="margin-top:6px">${items.length ? `${doneN} su ${items.length} fatte. Serie: ${g.streak} giorni.` : "Tocca il coach e dimmi cosa devi fare."}</p></section>`;
   }
+
+  // Anelli dei progressi di oggi
   const sm = d.smoking;
-  const smoke = d.plan.smoking?.active
-    ? `<div class="card row between"><div><div class="num" style="font-size:26px;font-weight:700">${sm.today}<span class="faint" style="font-size:16px"> / ${sm.limit ?? "—"}</span></div><div class="small muted">sigarette oggi${sm.savingsAll ? ` · ${fmtEur(sm.savingsAll.saved)} risparmiati` : ""}</div></div>
-       <div class="row"><button class="btn small ghost" data-act="craving">${ic("flame")}Voglia</button><button class="btn small" data-act="logCig">+1</button></div></div>`
+  const studyPlanned = items.filter((i) => ["studio", "lingua"].includes(i.category)).reduce((a, i) => a + Math.max(0, (toMin(i.end) ?? toMin(i.start) + 30) - toMin(i.start)), 0) || 60;
+  const studyDone = d.logsToday.filter((l) => ["studio", "lingua", "tesi"].includes(l.type) && (l.unit === "min" || !l.unit)).reduce((a, l) => a + (l.value || 0), 0);
+  const cats = d.plan.budget?.categories || {};
+  const dailyBudget = Object.values(cats).reduce((a, v) => a + (Number(v) || 0), 0) / 30;
+  const spentToday = d.logsToday.filter((l) => l.type === "spesa").reduce((a, l) => a + (l.value || 0), 0);
+  const water = d.logsToday.filter((l) => l.type === "acqua").length;
+  const rings = [
+    statRing({ value: doneN, max: items.length || 1, color: "var(--c-sport)", center: `${doneN}<small>/${items.length}</small>`, label: "attività" }),
+    d.plan.smoking?.active
+      ? statRing({ value: sm.today, max: sm.limit || 1, color: "var(--c-soldi)", center: `${sm.today}<small>/${sm.limit ?? "–"}</small>`, label: "sigarette", warn: sm.limit !== null && sm.today > sm.limit, act: "logCig" })
+      : statRing({ value: water, max: 8, color: "var(--c-salute)", center: `${water}<small>/8</small>`, label: "acqua", act: "quickLog", extra: 'data-type="acqua"' }),
+    statRing({ value: studyDone, max: studyPlanned, color: "var(--c-studio)", center: `${Math.round(studyDone)}<small>'</small>`, label: "studio" }),
+    statRing({ value: spentToday, max: dailyBudget || 20, color: "var(--c-commissione)", center: `${Math.round(spentToday)}<small>€</small>`, label: "spesi oggi", warn: dailyBudget && spentToday > dailyBudget, act: "quickLog", extra: 'data-type="spesa"' }),
+  ].join("");
+
+  const pushBanner = !d.pushDevices
+    ? `<button class="banner" data-act="enablePush" style="width:100%;text-align:left">${ic("bell")}<span><b>Attiva le notifiche</b><br><span class="small muted">Senza notifiche non posso scriverti all'orario giusto.</span></span></button>`
     : "";
-  const pushBanner =
-    !d.pushDevices
-      ? `<button class="banner" data-act="enablePush" style="width:100%;text-align:left">${ic("bell")}<span><b>Attiva le notifiche</b><br><span class="small muted">Senza notifiche non posso scriverti all'orario giusto.</span></span></button>`
-      : "";
   const props = d.pending.map((p) => `<div class="proposal"><p class="small" style="color:var(--now);font-weight:600">Proposta del coach</p><p style="margin-top:4px">${esc(p.summary)}</p><div class="row" style="margin-top:10px"><button class="btn small primary" data-act="proposal" data-id="${p.id}" data-accept="1">Approva</button><button class="btn small ghost" data-act="proposal" data-id="${p.id}">No grazie</button></div></div>`).join("");
   const checkinDue = d.todayItems.find((i) => i.kind === "checkin" && i.state?.status !== "done" && toMin(i.start) <= nowMinutes());
+  const lastCoach = [...d.chat].reverse().find((m) => m.role !== "user" && m.kind !== "interview");
 
   return `<main class="screen">
     <header class="topbar">
@@ -258,22 +369,24 @@ function homeView() {
       ${d.dayOff ? `<div class="banner">${ic("moon")}<span><b>Giornata no attiva</b><br><span class="small muted">Niente solleciti oggi. Fai il minimo, domani si riparte.</span> <button class="link small" data-act="dayOff" data-on="0">Disattiva</button></span></div>` : ""}
       ${nowCard}
       ${checkinDue ? `<button class="btn now block" data-act="checkin">Fai il bilancio della giornata</button>` : ""}
-      ${smoke}
-      <div class="row" style="gap:8px">
-        <button class="btn small grow" data-act="quickLog">${ic("plus")}Registra</button>
-        <button class="btn small grow" data-act="openSheet" data-sheet="taskForm">${ic("agenda")}Impegno</button>
-        ${d.dayOff ? "" : `<button class="btn small grow" data-act="dayOff" data-on="1">${ic("moon")}Giornata no</button>`}
+      <div class="rings">${rings}</div>
+      <div class="quick">
+        <button class="q-btn" data-act="quickLog">${ic("plus")}<span>Registra</span></button>
+        <button class="q-btn" data-act="openSheet" data-sheet="taskForm">${ic("agenda")}<span>Impegno</span></button>
+        ${d.plan.smoking?.active ? `<button class="q-btn" data-act="craving">${ic("flame")}<span>Voglia</span></button>` : ""}
+        <button class="q-btn" data-act="${d.dayOff ? "dayOff" : "dayOff"}" data-on="${d.dayOff ? "0" : "1"}">${ic("moon")}<span>${d.dayOff ? "Riprendo" : "Giornata no"}</span></button>
       </div>
+      ${lastCoach ? `<button class="coach-peek" data-act="openSheet" data-sheet="chat"><span class="cp-dot">${ic("coach")}</span><span class="cp-text">${esc(plainForSpeech(lastCoach.text).slice(0, 140))}</span></button>` : ""}
     </div>
     <section class="section">
-      <div class="section-head"><h2>Piano di oggi</h2><span class="muted small">${doneN}/${items.length}</span></div>
-      <div class="card" style="padding:4px 12px">${items.length ? `<ul class="timeline">${items.map((i) => itemRow(i, d.today)).join("")}</ul>` : `<div class="empty"><p>Nessuna attività oggi.</p></div>`}</div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>Coach</h2>${S.data.chat.length > 20 ? `<button class="link" data-act="openSheet" data-sheet="chat">Tutta la chat</button>` : ""}</div>
-      <div data-thread="home">${threadHtml(20, (m) => m.kind !== "interview")}</div>
+      <div class="section-head"><h2>La tua giornata</h2><span class="muted small">${doneN}/${items.length} fatte</span></div>
+      ${timelineHtml(d.todayItems, d.today)}
     </section>
   </main>`;
+}
+
+function fabHtml() {
+  return `<button class="fab" aria-label="Coach: tocca per scrivere, tieni premuto per parlare">${ic("coach")}<span class="fab-mic">${ic("mic")}</span></button>`;
 }
 
 // ---------- Agenda ----------
@@ -287,9 +400,7 @@ function agendaView() {
     <div class="days">${week
       .map((w) => `<button class="day-btn${w.date === date ? " on" : ""}${w.date === d.today ? " today" : ""}" data-act="pickDate" data-date="${w.date}"><small>${DOW_SHORT[dowOf(w.date)]}</small><b>${Number(w.date.slice(8))}</b><span class="dots">${w.items.slice(0, 5).map(() => "<i></i>").join("")}</span></button>`)
       .join("")}</div>`;
-  const dayList = dayData.items.length
-    ? `<div class="card" style="padding:4px 12px"><ul class="timeline">${dayData.items.filter((i) => i.kind !== "morning").map((i) => itemRow(i, date)).join("")}</ul></div>`
-    : `<div class="card empty"><h3>Giornata libera</h3><p class="small">Aggiungi un impegno o dillo al coach: “domani devo passare in posta”.</p></div>`;
+  const dayList = timelineHtml(dayData.items, date);
   const weekGrid = `<div class="week-grid">${week
     .map((w) => `<div class="week-col"><h4 class="${w.date === d.today ? "today" : ""}">${DOW_SHORT[dowOf(w.date)]} ${Number(w.date.slice(8))}</h4>${w.items
       .filter((i) => i.kind !== "morning")
@@ -468,7 +579,7 @@ function meView() {
         ${d.pushDevices ? row("testPush", "Manda una notifica di prova", "") : ""}
         ${row("openSheet", "Il profilo che il coach ha di te", "", 'data-sheet="profileSummary"')}
       </div></section>
-      <section class="stack"><button class="btn ghost block" data-act="redoInterview">Rifai l'intervista iniziale</button><button class="btn danger block" data-act="logout">Esci</button></section>
+      <section class="stack"><button class="btn block" data-act="regenPlan">Rifai il piano da capo</button><button class="btn ghost block" data-act="redoInterview">Rifai l'intervista iniziale</button><button class="btn danger block" data-act="logout">Esci</button></section>
     </div>
   </main>`;
 }

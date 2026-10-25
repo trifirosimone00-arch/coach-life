@@ -82,6 +82,7 @@ async function handle(uid, b, req) {
       if (job?.job === "plan" && job.status === "running" && Date.now() - job.ts < 10 * 60000) break;
       await update(K.profile(uid), defaultProfile, (p) => {
         p.onboardingStep = "generating";
+        if (b.regenerate) p.onboarded = false; // rifà il piano: si torna alla revisione
         return p;
       });
       await startJob(siteUrl(req), uid, "plan");

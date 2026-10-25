@@ -395,6 +395,36 @@ function micRelease() {
   Voice.stop(true);
 }
 document.addEventListener("pointerup", micRelease);
+
+// Pulsante flottante del coach: tocco = apre la chat, pressione lunga = parla.
+let fabTimer = null;
+let fabHeld = false;
+document.addEventListener("pointerdown", (e) => {
+  if (!e.target.closest(".fab")) return;
+  e.preventDefault();
+  if (Voice.rec) {
+    Voice.stop(true);
+    return;
+  }
+  fabHeld = false;
+  clearTimeout(fabTimer);
+  fabTimer = setTimeout(() => {
+    fabHeld = true;
+    S.voiceCtx = null;
+    openSheet("chat");
+    Voice.pressAt = Date.now() - 400;
+    Voice.start();
+  }, 350);
+});
+document.addEventListener("pointerup", (e) => {
+  if (!fabTimer) return;
+  clearTimeout(fabTimer);
+  fabTimer = null;
+  if (!fabHeld && e.target.closest(".fab")) {
+    openSheet("chat");
+    setTimeout(() => $("#cmp-sheet")?.focus(), 250);
+  }
+});
 document.addEventListener("pointercancel", micRelease);
 document.addEventListener("contextmenu", (e) => e.target.closest(".mic") && e.preventDefault());
 
