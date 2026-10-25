@@ -586,6 +586,16 @@ setInterval(() => {
   if (document.visibilityState === "visible" && S.token && !S.sheet && !S.chatBusy && !Voice.rec && !document.activeElement?.matches("textarea,input")) refresh();
 }, 60000);
 
+// Niente zoom: blocca il pizzico (Safari) e il doppio tocco.
+["gesturestart", "gesturechange", "gestureend"].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+document.addEventListener("touchmove", (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 300 && !e.target.closest("input, textarea, select")) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
 (async function boot() {
   const h = location.hash.slice(1);
   if (TABS.some((x) => x.id === h)) S.tab = h;
